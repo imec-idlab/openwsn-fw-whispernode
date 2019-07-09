@@ -14,12 +14,13 @@
 //=========================== define ==========================================
 
 #define SIXTOP_MAX_LINK_SNIFFING 60 // number of links to keep track of
+#define WHISPER_6P_STABILIZE_LINKS TRUE     // when true whisper will try to keep the seqnum stable on both nodes of the link (by sending request to both)
+#define WHISPER_6P_FAST_CLEAR_LINKS TRUE    // when true whisper will clear link as soon as the first seqnum error is received
 
 #define WHISPER_STATE_IDLE          0x00
 #define WHISPER_STATE_SIXTOP        0x01
 #define WHISPER_STATE_DIO           0x02
 #define WHISPER_STATE_WAIT_COAP     0x03
-#define WHISPER_STATE_SEND_RESULT   0x04
 
 #define WHISPER_COMMAND_DIO             0x01
 #define WHISPER_COMMAND_SIXTOP          0x02
@@ -31,6 +32,12 @@
 //=========================== typedef =========================================
 
 //=========================== variables =======================================
+
+typedef struct {
+    bool            active; // when true no normal dios will be sent
+    uint16_t        period; // rate at which dios will be sent
+    uint16_t        counter; // to slow down the DIOs
+} whisper_propagating_dio_settings;
 
 typedef struct {
     uint8_t srcId[2];
@@ -67,6 +74,7 @@ typedef struct {
     uint16_t        listOffset;
     bool            waiting_for_response;
     bool            command_parsed;
+    bool            stabilize_link;  // used to track if a 6p request is send to both nodes in the link (if true this has no happened)
 } whisper_sixtop_request_settings;
 
 typedef struct {
@@ -76,6 +84,7 @@ typedef struct {
     uint16_t             timerPeriod;
     uint8_t 			 state;
     open_addr_t          my_addr;
+    open_addr_t          eui_addr;
     open_addr_t          controller_addr;
     uint8_t              payloadBuffer[30]; // 30 bytes should be enough
     // Command variables
@@ -83,6 +92,7 @@ typedef struct {
     whisper_dio_settings whisper_dio;
     whisper_sixtop_request_settings whisper_sixtop;
     whisper_neighbor_info neighbors;
+    whisper_propagating_dio_settings whisper_propagating_dio;
 } whisper_vars_t;
 
 //=========================== prototypes ======================================
@@ -92,6 +102,7 @@ void            whisper_setState(uint8_t i);
 uint8_t         whisper_getState(void);
 void            whisper_task_remote(uint8_t* buf, uint8_t bufLen);
 void            whisperClearStateCb(opentimers_id_t id); // callback to clean up commands
+void            whisperExecuteCommand();
 
 // Whipser Fake dio command
 open_addr_t*    getWhisperDIOtarget(void);
@@ -99,6 +110,13 @@ open_addr_t*    getWhisperDIOparent(void);
 open_addr_t*    getWhisperDIOnextHop(void);
 dagrank_t       getWhisperDIOrank(void);
 void            whisperDioCommand(const uint8_t* command);
+
+// Whisper propagating dio
+bool            whisper_getSendNormalDio();
+void            whisper_setDIOPeriod(uint16_t period);
+void            whisper_togglePropagatingDios();
+void            whisper_setRankForNeighbour(uint8_t* command);
+void            whisper_sendPropagatingDios();
 
 // Whisper sixtop
 open_addr_t*    getWhisperSixtopSource(void);
@@ -109,6 +127,7 @@ void            whisperSixtopProcessIE(void);
 
 bool            whisperSixtopPacketAccept(ieee802154_header_iht *ieee802514_header);
 void            whisperGetNeighborInfoFromSixtop(ieee802154_header_iht* header, OpenQueueEntry_t* msg);
+void            whisperStabilizeLink(const uint8_t response_type);
 
 // Whisper ACK Sniffing
 bool            whisperACKreceive(ieee802154_header_iht* ieee802154_header);
