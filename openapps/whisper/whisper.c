@@ -969,51 +969,51 @@ void sendCoapResponseToController(uint8_t *payload, uint8_t length) {
 // ============================================================================================
 // Logging (should be removed for openmote build, no printf)
 void whisper_log(char* msg, ...) {
-	open_addr_t my_id = *idmanager_getMyID(ADDR_16B);
+/*	open_addr_t my_id = *idmanager_getMyID(ADDR_16B);*/
 
-	char state[20];
-	switch(whisper_vars.state) {
-        case WHISPER_STATE_IDLE: strcpy(state, "IDLE");
-            break;
-        case WHISPER_STATE_SIXTOP: strcpy(state, "SIXTOP");
-            break;
-        case WHISPER_STATE_DIO: strcpy(state, "DIO");
-            break;
-        case WHISPER_STATE_WAIT_COAP: strcpy(state, "WAIT_COAP");
-            break;
-        default: strcpy(state, "UNKNOWN");
-            break;
-	}
+/*	char state[20];*/
+/*	switch(whisper_vars.state) {*/
+/*        case WHISPER_STATE_IDLE: strcpy(state, "IDLE");*/
+/*            break;*/
+/*        case WHISPER_STATE_SIXTOP: strcpy(state, "SIXTOP");*/
+/*            break;*/
+/*        case WHISPER_STATE_DIO: strcpy(state, "DIO");*/
+/*            break;*/
+/*        case WHISPER_STATE_WAIT_COAP: strcpy(state, "WAIT_COAP");*/
+/*            break;*/
+/*        default: strcpy(state, "UNKNOWN");*/
+/*            break;*/
+/*	}*/
 
-	printf("[%s] [%d] whisper_node - ", state, my_id.addr_64b[1]);
+/*	printf("[%s] [%d] whisper_node - ", state, my_id.addr_64b[1]);*/
 
-	char buf[100];
-	va_list v1;
-	va_start(v1, msg);
-	vsnprintf(buf, sizeof(buf), msg, v1);
-	va_end(v1);
+/*	char buf[100];*/
+/*	va_list v1;*/
+/*	va_start(v1, msg);*/
+/*	vsnprintf(buf, sizeof(buf), msg, v1);*/
+/*	va_end(v1);*/
 
-	printf(buf);
+/*	printf(buf);*/
 }
 
 void whisper_print_address(open_addr_t* addr) {
-	uint8_t length = 4;
-	uint8_t* start_addr = addr->addr_16b;
-	switch (addr->type) {
-		case ADDR_64B:
-			length = 8;
-			start_addr = addr->addr_64b;
-			break;
-		case ADDR_128B:
-			length = 16;
-			start_addr = addr->addr_128b;
-			break;
-		default: break;
-	}
+/*	uint8_t length = 4;*/
+/*	uint8_t* start_addr = addr->addr_16b;*/
+/*	switch (addr->type) {*/
+/*		case ADDR_64B:*/
+/*			length = 8;*/
+/*			start_addr = addr->addr_64b;*/
+/*			break;*/
+/*		case ADDR_128B:*/
+/*			length = 16;*/
+/*			start_addr = addr->addr_128b;*/
+/*			break;*/
+/*		default: break;*/
+/*	}*/
 
-	for(uint8_t i = 0; i < length; i++) {
-		printf("%02x", start_addr[i]);
-		if(i < length - 1) printf(":");
-	}
-	printf("\n");
+/*	for(uint8_t i = 0; i < length; i++) {*/
+/*		printf("%02x", start_addr[i]);*/
+/*		if(i < length - 1) printf(":");*/
+/*	}*/
+/*	printf("\n");*/
 } 
