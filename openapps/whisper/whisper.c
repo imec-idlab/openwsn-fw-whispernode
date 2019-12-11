@@ -81,7 +81,7 @@ void whisper_init(void) {
 	opencoap_register(&whisper_vars.desc);
 
 	// Start timer for data collection (on root)
-    whisper_vars.timerPeriod = 5000; // 5 seconds
+    whisper_vars.timerPeriod = 1000; // 5 seconds
     whisper_vars.periodicTimer = opentimers_create(TIMER_GENERAL_PURPOSE, TASKPRIO_RPL);
     whisper_vars.oneshotTimer = opentimers_create(TIMER_GENERAL_PURPOSE, TASKPRIO_RPL);
     opentimers_scheduleIn(
@@ -113,6 +113,7 @@ void whisper_sendDone(OpenQueueEntry_t* msg, owerror_t error) {
 }
 
 void whisperExecuteCommand() {
+    whisper_log("Executing Whisper command\n");
     switch (whisper_vars.payloadBuffer[1]) {
         case WHISPER_COMMAND_DIO:
             whisper_log("Whisper fake dio command (remote)\n");
@@ -120,8 +121,11 @@ void whisperExecuteCommand() {
             break;
         case WHISPER_COMMAND_SIXTOP:
             whisper_log("Whisper 6P command (remote).\n");
-            if (whisperSixtopParse(whisper_vars.payloadBuffer)) whisperExecuteSixtop();
-            else whisper_log("Parsing command failed.\n");
+            if (whisperSixtopParse(whisper_vars.payloadBuffer)){
+                whisperExecuteSixtop();
+            }else {
+                whisper_log("Parsing command failed.\n");
+            }
             break;
         case WHISPER_COMMAND_LINK_INFO:
             whisper_log("Whisper 6P stored link information: \n");
@@ -196,7 +200,7 @@ void whisperClearStateCb(opentimers_id_t id) {
 
 void whisper_timer_cb(opentimers_id_t id) {
     // Check if the neigbour list has changed, add the autonomous cell to each neigbour
-    neighbors_updateAutonomousCells();
+    //neighbors_updateAutonomousCells(); //this is now done in neighbors.c
     leds_debug_toggle();
 }
 
@@ -217,7 +221,7 @@ void whisper_task_remote(uint8_t* buf, uint8_t bufLen) {
         // Start timer to clean up (in any event)
         opentimers_scheduleIn(
                 whisper_vars.oneshotTimer,
-                (uint32_t) 10000, // wait 10 seconds
+                (uint32_t) 60000, // wait 30 seconds
                 TIME_MS,
                 TIMER_ONESHOT,
                 whisperClearStateCb
@@ -234,7 +238,7 @@ owerror_t whisper_receive(OpenQueueEntry_t* msg,
 						uint8_t*          coap_outgoingOptionsLen)
 {
 	owerror_t outcome;
-
+    whisper_log("Received CoAP, my state is %d\n",whisper_vars.state);
     // Dont's do anything new when not, idle
     if(whisper_vars.state != WHISPER_STATE_IDLE) {
         // reset packet payload
@@ -245,6 +249,14 @@ owerror_t whisper_receive(OpenQueueEntry_t* msg,
     }
 
 	switch (coap_header->Code) {
+        case COAP_CODE_REQ_GET:
+            whisper_log("Received CoAP GET.\n");
+            // reset packet payload
+            msg->payload                     = &(msg->packet[127]);
+            msg->length                      = 0;
+            coap_header->Code                = COAP_CODE_RESP_CHANGED;
+            outcome                          = E_SUCCESS;
+            break;
         case COAP_CODE_REQ_PUT:
             whisper_log("Received CoAP PUT.\n");
 
@@ -254,7 +266,7 @@ owerror_t whisper_receive(OpenQueueEntry_t* msg,
                 // Start timer to clean up (in any event)
                 opentimers_scheduleIn(
                         whisper_vars.oneshotTimer,
-                        (uint32_t) 10000, // wait 10 seconds
+                        (uint32_t) 60000, // wait 30 seconds
                         TIME_MS,
                         TIMER_ONESHOT,
                         whisperClearStateCb
@@ -301,6 +313,8 @@ open_addr_t* getWhisperSixtopSource(void) {
 }
 
 bool whisperACKreceive(ieee802154_header_iht* ieee802154_header) {
+
+    whisper_log("Parsing ack in whisper.\n");
     if(whisper_vars.whisper_ack.acceptACKs == TRUE) {
         if(packetfunctions_sameAddress(&ieee802154_header->src, &whisper_vars.whisper_ack.ACKsrc) &&
             packetfunctions_sameAddress(&ieee802154_header->dest, &whisper_vars.whisper_ack.ACKdest)) {
@@ -312,10 +326,21 @@ bool whisperACKreceive(ieee802154_header_iht* ieee802154_header) {
                 sendCoapResponseToController(result, 2);
                 whisper_vars.state = WHISPER_STATE_IDLE;
             }
-
+            whisper_log("Parsing ack true in whisper.\n");
+            return TRUE;
+        }else{
+            whisper_log("ACK received. Probably a remote DIO ack\n");
+            whisper_vars.whisper_ack.acceptACKs = FALSE;
+            if(whisper_vars.state == WHISPER_STATE_DIO) {
+                uint8_t result[2] = {WHISPER_COMMAND_DIO, E_SUCCESS};
+                sendCoapResponseToController(result, 2);
+                whisper_vars.state = WHISPER_STATE_IDLE;
+            }
+            whisper_log("Parsing ack true in whisper.\n");
             return TRUE;
         }
     }
+    whisper_log("Parsing ack false in whisper.\n");
     return FALSE;
 }
 
@@ -349,6 +374,13 @@ void whisperDioCommand(const uint8_t* command) {
         packetfunctions_ip128bToMac64b(&whisper_vars.whisper_dio.target,&temp,&whisper_vars.whisper_ack.ACKsrc);
         whisper_vars.whisper_ack.ACKdest.type = ADDR_64B;
         packetfunctions_ip128bToMac64b(&whisper_vars.whisper_dio.parent,&temp,&whisper_vars.whisper_ack.ACKdest);
+        whisper_vars.whisper_ack.acceptACKs = TRUE;
+    }if(result == E_SUCCESS && (idmanager_isMyAddress(&whisper_vars.whisper_dio.parent) == TRUE)) {
+        // Set ACK addresses
+        // whisper_vars.whisper_ack.ACKsrc.type = ADDR_64B;
+        // packetfunctions_ip128bToMac64b(&whisper_vars.whisper_dio.parent,&temp,&whisper_vars.whisper_ack.ACKsrc);
+        // whisper_vars.whisper_ack.ACKdest.type = ADDR_64B;
+        // packetfunctions_ip128bToMac64b(&whisper_vars.whisper_dio.parent,&temp,&whisper_vars.whisper_ack.ACKdest);
         whisper_vars.whisper_ack.acceptACKs = TRUE;
     }
 }
@@ -448,6 +480,8 @@ void whisperSixtopResonseReceive(OpenQueueEntry_t* pkt, uint8_t code, uint8_t pt
     open_addr_t addr = pkt->l2_nextORpreviousHop;
     uint8_t result[2];
 
+    whisper_log("Recevied 6P Response in Whisper. RC %d Processing...PTR is %d\n",code,ptr);
+
     result[0] = WHISPER_COMMAND_SIXTOP;
     if(whisper_vars.whisper_sixtop.waiting_for_response) {
         if (packetfunctions_sameAddress(&addr, &whisper_vars.whisper_sixtop.target)) {
@@ -465,11 +499,21 @@ void whisperSixtopResonseReceive(OpenQueueEntry_t* pkt, uint8_t code, uint8_t pt
                         uint8_t destID[2] = {whisper_vars.whisper_sixtop.target.addr_64b[6], whisper_vars.whisper_sixtop.target.addr_64b[7]};
                         updateSixtopLinkSeqNum(srcID, destID, 0);
                     }
+
+                    if(whisper_vars.whisper_sixtop.request_type == IANA_6TOP_CMD_LIST) {
+                        whisper_log("Whisper 6P LIST command successful received from %d. No content\n",pkt->l2_nextORpreviousHop.addr_64b[7]);
+                    }
+
+                    if(whisper_vars.whisper_sixtop.request_type == IANA_6TOP_CMD_ADD) {
+                        whisper_log("Whisper 6P ADD command successful received from %d.\n",pkt->l2_nextORpreviousHop.addr_64b[7]);
+                    }
+
+
                     result[1] = E_SUCCESS;
                     sendCoapResponseToController(result, 2);
                     break;
                 case IANA_6TOP_RC_EOL: // FIXME: for now only process the cells when the response is EOL, this means only the cells in this packet will be sent to the controller
-                    whisper_log("Whisper 6P List response received.\n");
+                    whisper_log("Whisper 6P List response received from %d. Len %d\n",pkt->l2_nextORpreviousHop.addr_64b[7],pktLen);
 
                     uint8_t to_controller[CELLLIST_MAX_LEN * sizeof(uint8_t) * 2];
                     memset(to_controller, 0, CELLLIST_MAX_LEN * sizeof(uint8_t) * 2);
@@ -479,6 +523,7 @@ void whisperSixtopResonseReceive(OpenQueueEntry_t* pkt, uint8_t code, uint8_t pt
                     responeLength++;
 
                     while(pktLen>0) {
+                        
                         to_controller[responeLength]        =  *((uint8_t*)(pkt->payload)+ptr);
                         to_controller[responeLength + 1]    = (*((uint8_t*)(pkt->payload)+ptr+1))<<8;
                         to_controller[responeLength + 2]    =  *((uint8_t*)(pkt->payload)+ptr+2);
@@ -486,8 +531,28 @@ void whisperSixtopResonseReceive(OpenQueueEntry_t* pkt, uint8_t code, uint8_t pt
                         ptr    += 4;
                         pktLen -= 4;
                         responeLength += 4;
+                        
+
+                    }
+                    whisper_log("Adding RX Cell: offset %d channel %d from neigh %d\n",to_controller[1],to_controller[3],whisper_vars.whisper_sixtop.source.addr_64b[7]);
+                    open_addr_t     temp_neighbor;
+                    memset(&temp_neighbor,0,sizeof(temp_neighbor));
+                    temp_neighbor.type             = ADDR_ANYCAST;
+                    if(schedule_isSlotOffsetAvailable(to_controller[1])) {
+                        schedule_addActiveSlot(
+                                to_controller[1],                                                                 // slot offset
+                                CELLTYPE_RX,                                                              // type of slot
+                                FALSE,                                                                       // shared?
+                                FALSE,                                                                       // auto cell?
+                                to_controller[3], // channel offset
+                                &whisper_vars.whisper_sixtop.source                                       // neighbor
+                                
+                        );
+                    }else{
+                        whisper_log("Cell Not available: offset %d channel %d.\n",to_controller[1],to_controller[3]);
                     }
 
+                    whisper_log("To controller: %d %d %d %d \n",to_controller[0],to_controller[1],to_controller[2],to_controller[3]);
                     sendCoapResponseToController(to_controller, responeLength);
                     break;
                 case IANA_6TOP_RC_SEQNUM_ERR:
@@ -510,7 +575,7 @@ void whisperSixtopResonseReceive(OpenQueueEntry_t* pkt, uint8_t code, uint8_t pt
                         // Restart the cleanup timer
                         opentimers_scheduleIn(
                                 whisper_vars.oneshotTimer,
-                                (uint32_t) 10000, // wait 10 seconds
+                                (uint32_t) 60000, // wait 30 seconds
                                 TIME_MS,
                                 TIMER_ONESHOT,
                                 whisperClearStateCb
@@ -525,7 +590,7 @@ void whisperSixtopResonseReceive(OpenQueueEntry_t* pkt, uint8_t code, uint8_t pt
                 // Restart the cleanup timer
                 opentimers_scheduleIn(
                         whisper_vars.oneshotTimer,
-                        (uint32_t) 10000, // wait 10 seconds
+                        (uint32_t) 60000, // wait 30 seconds
                         TIME_MS,
                         TIMER_ONESHOT,
                         whisperClearStateCb
@@ -583,6 +648,7 @@ void whisperStabilizeLink(const uint8_t response_type) {
 }
 
 bool whisperSixtopPacketAccept(ieee802154_header_iht *ieee802514_header) {
+    whisper_log("Checking if accept 6p packet.\n");
     if(whisper_vars.whisper_sixtop.waiting_for_response) {
         if (packetfunctions_sameAddress(&whisper_vars.whisper_sixtop.target, &ieee802514_header->src)) {
             if (ieee802514_header->frameType == IEEE154_TYPE_DATA) {
@@ -644,6 +710,7 @@ bool whisperSixtopParse(const uint8_t* command) {
         return TRUE;
     }
 
+    whisper_log("Cell Type is. %d\n",command[7]);
     // CellType
     whisper_vars.whisper_sixtop.cellType = command[7];
     switch(command[7]) {
@@ -730,7 +797,9 @@ void whisperExecuteSixtop(void) {
             whisper_log("Sending 6P command with seqNum: %d\n", seqNum);
             updateSixtopLinkSeqNum(srcID, destID, seqNum + 1);
         }
-
+        whisper_log("SRC: %d\n", srcID[1]);
+        whisper_log("DST: %d\n", destID[1]);
+        whisper_log("CELLoptions: %d\n", whisper_vars.whisper_sixtop.cellType);
         // call sixtop
         request = sixtop_request_Whisper(
                 whisper_vars.whisper_sixtop.request_type,  // code
@@ -753,10 +822,12 @@ void whisperExecuteSixtop(void) {
         whisper_vars.whisper_ack.acceptACKs = TRUE;
         whisper_log("Sixtop request sent.\n");
     }
-    else whisper_log("Sixtop request not sent. Something went wrong.\n");
+    else whisper_log("Sixtop request not sent. Something went wrong. %d\n",request);
 }
 
 void whisperGetNeighborInfoFromSixtop(ieee802154_header_iht* header, OpenQueueEntry_t* msg) {
+
+    whisper_log("Processing sixp.\n");
     if( (idmanager_isMyAddress(&header->src) == FALSE && idmanager_isMyAddress(&header->dest) == FALSE) &&
         (isNeighbor(&header->src) && isNeighbor(&header->dest)) &&
         (header->ieListPresent == TRUE && header->frameType == IEEE154_TYPE_DATA))
@@ -770,14 +841,25 @@ void whisperGetNeighborInfoFromSixtop(ieee802154_header_iht* header, OpenQueueEn
         ptr++;
         temp_16b    = temp_8b + ((*((uint8_t*)(msg->payload)+ptr))<<8);
         ptr++;
-        // check ietf ie group id, type
-        if ((temp_16b & IEEE802154E_DESC_LEN_PAYLOAD_ID_TYPE_MASK) != (IANA_IETF_IE_GROUP_ID | IANA_IETF_IE_TYPE))
-            return;
 
+        whisper_log("Processing IE %d\n",temp_16b);
+
+        // check ietf ie group id, type
+        if ((temp_16b & IEEE802154E_DESC_LEN_PAYLOAD_ID_TYPE_MASK) != (IANA_IETF_IE_GROUP_ID | IANA_IETF_IE_TYPE)){
+            whisper_log("1rec err val1 is %d\n",(temp_16b & IEEE802154E_DESC_LEN_PAYLOAD_ID_TYPE_MASK));
+            whisper_log("1rec err val2 is %d\n",(IANA_IETF_IE_GROUP_ID | IANA_IETF_IE_TYPE));
+            return;
+        } 
+        
         // check 6p subtype Id
         subtypeid = *((uint8_t*)(msg->payload)+ptr);
         ptr += 1;
+
+        whisper_log("Subtype id is %d\n", subtypeid);
+        whisper_log("good Subtype id is %d\n", IANA_6TOP_SUBIE_ID);
         if (subtypeid != IANA_6TOP_SUBIE_ID) return;
+
+        whisper_log("Subtype id is fine");
 
         // check 6p version
         temp_8b = *((uint8_t*)(msg->payload)+ptr);
@@ -786,6 +868,8 @@ void whisperGetNeighborInfoFromSixtop(ieee802154_header_iht* header, OpenQueueEn
         if (temp_8b>>IANA_6TOP_TYPE_SHIFT == 3) return;
         version    = temp_8b &  IANA_6TOP_VESION_MASK;
         type       = temp_8b >> IANA_6TOP_TYPE_SHIFT;
+
+        whisper_log("type shift is fine");
 
         // get 6p code
         code = *((uint8_t*)(msg->payload)+ptr);
@@ -798,8 +882,11 @@ void whisperGetNeighborInfoFromSixtop(ieee802154_header_iht* header, OpenQueueEn
         // get 6p seqNum
         seqNum =  *((uint8_t*)(msg->payload)+ptr) & 0xff;
 
+        whisper_log("Processing sixp ok.\n");
+
         if(type == SIXTOP_CELL_REQUEST && sfid == msf_getsfid()) {
             if (code != IANA_6TOP_CMD_CLEAR) {
+                whisper_log("Received 6p request.\n");
                 // Store the seqNum for the link
                 seqNum++;
                 whisperUpdateOrAddSixtopLinkInfo(&header->src, &header->dest, seqNum);
@@ -812,6 +899,27 @@ void whisperGetNeighborInfoFromSixtop(ieee802154_header_iht* header, OpenQueueEn
             }
         }
     }
+    if( (idmanager_isMyAddress(&header->src) == FALSE && idmanager_isMyAddress(&header->dest) == FALSE))
+    {
+        whisper_log("Is from or for not me.\n");
+    }else{
+        whisper_log("Is actually from or for me.\n");
+    }
+    if( (isNeighbor(&header->src) && isNeighbor(&header->dest))
+        )
+    {
+        whisper_log("Is from or for a known neighbor.\n");
+        
+    }else{
+        whisper_log("Not from or for a known neighbor.\n");
+    }
+    if(header->ieListPresent == TRUE && header->frameType == IEEE154_TYPE_DATA)
+    {
+        whisper_log("Do have IE or is DATA.\n");
+    }else{
+        whisper_log("Not valid.\n");
+    }
+
 }
 
 // ------------ Helper functions ------------------
@@ -856,6 +964,9 @@ bool addSixtopLink(const uint8_t* srcID, const uint8_t* destID, uint8_t seqNum) 
             whisper_vars.neighbors.sixtop[i].seqNum = seqNum;
             whisper_vars.neighbors.sixtop[i].active = TRUE;
             whisper_log("Adding link: %d -> %d, seqNum: %d.\n", srcID[1], destID[1], seqNum);
+            uint8_t              asnArray[5];
+            ieee154e_getAsn(asnArray);
+            whisper_log("Adding link at %d %d %d %d %d\n",asnArray[0],asnArray[1],asnArray[2],asnArray[3],asnArray[4]);
             return TRUE;
         }
     }
@@ -884,6 +995,7 @@ void updateSixtopLinkSeqNum(const uint8_t* srcID, const uint8_t* destID, uint8_t
 
 void removeAllSixtopLinksNeighbor(open_addr_t* neighbor) {
     uint8_t ID[2] = {neighbor->addr_64b[6], neighbor->addr_64b[7]};
+    whisper_log("Removing neigbor %d\n", neighbor->addr_64b[7]);
     for(uint8_t i = 0; i < SIXTOP_MAX_LINK_SNIFFING; i++) {
         if ((ID[0] == whisper_vars.neighbors.sixtop[i].srcId[0] &&
             ID[1] == whisper_vars.neighbors.sixtop[i].srcId[1] ) ||
@@ -902,7 +1014,7 @@ void sendCoapResponseToController(uint8_t *payload, uint8_t length) {
     coap_option_iht options[2];
     open_addr_t temp;
 
-    // Do net send when no parent
+    // Do not send when no parent
     if(icmpv6rpl_getPreferredParentEui64(&temp) == FALSE)
         return;
 
