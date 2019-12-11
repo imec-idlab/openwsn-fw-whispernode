@@ -157,12 +157,13 @@ owerror_t openserial_printSniffedPacket(
     uint8_t             length,
     uint8_t             channel
 );
+
+void      task_openserial_debugPrint(void);
+
 owerror_t openserial_sendWhisper(
     uint8_t*            buf,
     uint8_t             bufLen
 );
-
-void      task_openserial_debugPrint(void);
 
 owerror_t openserial_print_str(char* buffer, uint8_t length);
 owerror_t openserial_print_uint32_t(uint32_t value);

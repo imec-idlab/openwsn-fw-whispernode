@@ -56,13 +56,13 @@ owerror_t openserial_printInfoErrorCritical(
 // command handlers
 void openserial_handleRxFrame(void);
 void openserial_handleEcho(uint8_t* but, uint8_t bufLen);
-void openserial_handleWhisper(uint8_t* but, uint8_t bufLen);
 void openserial_get6pInfo(uint8_t commandId, uint8_t* code,uint8_t* cellOptions,uint8_t* numCells,cellInfo_ht* celllist_add,cellInfo_ht* celllist_delete,uint8_t* listOffset,uint8_t* maxListLen,uint8_t ptr, uint8_t commandLen);
 void openserial_handleCommands(void);
 
 // misc
 void openserial_debugPrint_timer_cb(opentimers_id_t id);
 void openserial_board_reset_cb(opentimers_id_t id);
+void openserial_handleWhisper(uint8_t* but, uint8_t bufLen);
 
 // HDLC output
 void outputHdlcOpen(void);
@@ -594,16 +594,16 @@ void openserial_handleRxFrame() {
         case SERFRAME_PC2MOTE_DATA:
             openbridge_triggerData();
             break;
-        case SERFRAME_PC2MOTE_TRIGGERSERIALECHO:
-            openserial_handleEcho(
-                &openserial_vars.inputBuf[1],
-                openserial_vars.inputBufFillLevel-1
-            );
-            break;
         case SERFRAME_PC2MOTE_WHISPER:
             openserial_handleWhisper(
                     &openserial_vars.inputBuf[0],
                     (uint8_t) (openserial_vars.inputBufFillLevel - 1)
+            );
+            break;
+        case SERFRAME_PC2MOTE_TRIGGERSERIALECHO:
+            openserial_handleEcho(
+                &openserial_vars.inputBuf[1],
+                openserial_vars.inputBufFillLevel-1
             );
             break;
         case SERFRAME_PC2MOTE_COMMAND:

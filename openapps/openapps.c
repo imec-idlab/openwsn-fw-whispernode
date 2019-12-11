@@ -14,14 +14,14 @@
 #include "cjoin.h"
 #include "cwellknown.h"
 #include "rrt.h"
-
-#include "whisper.h"
 // UDP
 #include "uecho.h"
 #include "uinject.h"
 #include "userialbridge.h"
 #include "uexpiration.h"
 #include "uexpiration_monitor.h"
+
+#include "whisper.h"
 
 //=========================== variables =======================================
 
@@ -43,11 +43,12 @@ void openapps_init(void) {
    cwellknown_init();
    //rrt_init();
 
-   whisper_init();
 
+
+   whisper_init();
    // UDP
    //uecho_init();
-   // uinject_init();
+   //uinject_init();
    //userialbridge_init();
    //uexpiration_init();
    //umonitor_init();
