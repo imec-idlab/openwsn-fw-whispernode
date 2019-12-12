@@ -97,9 +97,9 @@ owerror_t iphc_sendFromForwarding(
         return E_FAIL;
     }
 
-    if (msg->isDioFake) {
+   if (msg->isDioFake) {
         ipv6_outer_header->hop_limit = 15;
-    }
+   }
    
     //discard the packet.. hop limit reached.
     if (ipv6_outer_header->src.type != ADDR_NONE){

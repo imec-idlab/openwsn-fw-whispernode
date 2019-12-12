@@ -821,6 +821,8 @@ void openserial_handleCommands(void){
         case COMMAND_SET_6P_COUNT:
         case COMMAND_SET_6P_LIST:
         case COMMAND_SET_6P_CLEAR:
+            //printf("6P command from serial %d \n");
+
             // get preferred parent
             foundNeighbor =icmpv6rpl_getPreferredParentEui64(&neighbor);
             if (foundNeighbor==FALSE) {

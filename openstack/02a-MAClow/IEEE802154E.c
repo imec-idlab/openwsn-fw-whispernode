@@ -854,7 +854,6 @@ port_INLINE bool ieee154e_processIEs(OpenQueueEntry_t* pkt, uint16_t* lenIE) {
 port_INLINE void activity_ti1ORri1(void) {
     cellType_t  cellType;
     open_addr_t neighbor;
-    open_addr_t autonomousUnicastNeighbor;
     uint8_t     i;
     uint8_t     asn[5];
     uint8_t     join_priority;
@@ -908,6 +907,8 @@ port_INLINE void activity_ti1ORri1(void) {
     // Reset sleep slots
     ieee154e_vars.numOfSleepSlots = 1;
 
+    // update nextActiveSlotOffset before using
+    ieee154e_vars.nextActiveSlotOffset = schedule_getNextActiveSlotOffset();
     if (ieee154e_vars.slotOffset==ieee154e_vars.nextActiveSlotOffset) {
         // this is the next active slot
 
@@ -941,7 +942,6 @@ port_INLINE void activity_ti1ORri1(void) {
                 incrementAsnOffset();
             }
         }
-        ieee154e_vars.nextActiveSlotOffset = schedule_getNextActiveSlotOffset();
     } else {
         // this is NOT the next active slot, abort
 
@@ -958,70 +958,35 @@ port_INLINE void activity_ti1ORri1(void) {
         case CELLTYPE_TX:
             // assuming that there is nothing to send
             ieee154e_vars.dataToSend = NULL;
-            // get the neighbor to check this is dedicated cell or not later
+            // get the neighbor
             schedule_getNeighbor(&neighbor);
 
             // check whether we can send
             if (schedule_getOkToSend()) {
                 if (packetfunctions_isBroadcastMulticast(&neighbor)==FALSE){
 
-                    if (schedule_getShared()){
-                        // this is an autonomous TxRx cell (unicast)
-                        ieee154e_vars.dataToSend = openqueue_macGet6PandJoinPacket(&neighbor);
-                    } else {
-                        // this is a managed Tx cell
-                        ieee154e_vars.dataToSend = openqueue_macGetNonJoinIPv6Packet(&neighbor);
+                    // look for a unicast packet to send
+                    ieee154e_vars.dataToSend = openqueue_macGetUnicastPakcet(&neighbor);
 
-                        if (ieee154e_vars.dataToSend == NULL){
-                            ieee154e_vars.dataToSend = openqueue_macGetKaPacket(&neighbor);
-                        }
+                    if (ieee154e_vars.dataToSend == NULL){
+                        ieee154e_vars.dataToSend = openqueue_macGetKaPacket(&neighbor);
+                    }
 
-                        // update numcellpassed and numcellused on managed Tx cell
+                    if (schedule_getShared()==FALSE){
+                        // update numcellelapsed and numcellused on managed Tx cell
                         if (ieee154e_vars.dataToSend!=NULL) {
                             ieee154e_vars.dataToSend->l2_sendOnTxCell = TRUE;
-                            msf_updateCellsUsed(&neighbor);
+                            msf_updateCellsUsed(&neighbor, CELLTYPE_TX);
                         }
-                        msf_updateCellsPassed(&neighbor);
+                        msf_updateCellsElapsed(&neighbor, CELLTYPE_TX);
                     }
                 } else {
-                    if (schedule_getShared()) {
-                        // this is minimal cell
-                        ieee154e_vars.dataToSend = openqueue_macGetDIOPacket();
-
-                        /*// Added for whisper to send 6p commands during a shared cell
-                        if(ieee154e_vars.dataToSend == NULL) {
-                            ieee154e_vars.dataToSend = openqueue_macGet6PandJoinPacket(&neighbor);
-                            if(ieee154e_vars.dataToSend != NULL) {
-                                if(ieee154e_vars.dataToSend->creator == COMPONENT_SIXTOP_RES) {
-                                    whisper_log("Sending 6p in shared cell.\n");
-                                }
-                            }
-                        }*/
-
-                        if (ieee154e_vars.dataToSend==NULL) {
-                            couldSendEB=TRUE;
-                            // look for an EB packet in the queue
-                            ieee154e_vars.dataToSend = openqueue_macGetEBPacket();
-                        }
-                    } else {
-                        // this is autonomous TXRX cell (anycast)
-                        if (msf_getHashCollisionFlag()==TRUE){
-                            // check whether there is 6p or join request packet to send first
-                            ieee154e_vars.dataToSend = openqueue_macGet6PandJoinPacket(&neighbor);
-                        }
-
-                        if (ieee154e_vars.dataToSend == NULL) {
-                            memset(&autonomousUnicastNeighbor, 0, sizeof(open_addr_t));
-                            schedule_getAutonomousTxRxCellUnicastNeighbor(&autonomousUnicastNeighbor);
-
-                            // autonomousUnicastNeighbor may be not found
-                            // in that case any 6P request is OK to send on anycast autonomous cell
-                            ieee154e_vars.dataToSend = openqueue_macGet6PRequestOnAnycast(&autonomousUnicastNeighbor);
-                        }
-
-                        if (ieee154e_vars.dataToSend == NULL) {
-                            ieee154e_vars.dataToSend = openqueue_macGet6PResponseAndDownStreamPacket(&neighbor);
-                        }
+                    // this is minimal cell
+                    ieee154e_vars.dataToSend = openqueue_macGetDIOPacket();
+                    if (ieee154e_vars.dataToSend==NULL){
+                        couldSendEB=TRUE;
+                        // look for an EB packet in the queue
+                        ieee154e_vars.dataToSend = openqueue_macGetEBPacket();
                     }
                 }
             }
@@ -1049,7 +1014,7 @@ port_INLINE void activity_ti1ORri1(void) {
                 ieee154e_vars.dataToSend->l2_numTxAttempts++;
 #ifdef SLOT_FSM_IMPLEMENTATION_MULTIPLE_TIMER_INTERRUPT
                 // 1. schedule timer for loading packet
-            sctimer_scheduleActionIn(ACTION_LOAD_PACKET, ieee154e_vars.startOfSlotReference+DURATION_tt1);
+                sctimer_scheduleActionIn(ACTION_LOAD_PACKET, ieee154e_vars.startOfSlotReference+DURATION_tt1);
                 // prepare the packet for load packet action at DURATION_tt1
                 // make a local copy of the frame
                 packetfunctions_duplicatePacket(&ieee154e_vars.localCopyForTransmission, ieee154e_vars.dataToSend);
@@ -1066,19 +1031,19 @@ port_INLINE void activity_ti1ORri1(void) {
                 // add 2 CRC bytes only to the local copy as we end up here for each retransmission
                 packetfunctions_reserveFooterSize(&ieee154e_vars.localCopyForTransmission, 2);
 
-            // configure the radio for that frequency
-            radio_setFrequency(ieee154e_vars.freq);
+                // configure the radio for that frequency
+                radio_setFrequency(ieee154e_vars.freq);
 
                 // set the tx buffer address and length register.(packet is NOT loaded at this moment)
                 radio_loadPacket_prepare(ieee154e_vars.localCopyForTransmission.payload,
                                      ieee154e_vars.localCopyForTransmission.length);
                 // 2. schedule timer for sending packet
-            sctimer_scheduleActionIn(ACTION_SEND_PACKET,  ieee154e_vars.startOfSlotReference+DURATION_tt2);
+                sctimer_scheduleActionIn(ACTION_SEND_PACKET,  ieee154e_vars.startOfSlotReference+DURATION_tt2);
                 // 3. schedule timer radio tx watchdog
-            sctimer_scheduleActionIn(ACTION_SET_TIMEOUT, ieee154e_vars.startOfSlotReference+DURATION_tt3);
+                sctimer_scheduleActionIn(ACTION_SET_TIMEOUT, ieee154e_vars.startOfSlotReference+DURATION_tt3);
                 // 4. set capture interrupt for Tx SFD senddone and packet senddone
-            sctimer_setCapture(ACTION_TX_SFD_DONE);
-            sctimer_setCapture(ACTION_TX_SEND_DONE);
+                sctimer_setCapture(ACTION_TX_SFD_DONE);
+                sctimer_setCapture(ACTION_TX_SEND_DONE);
 #else
                 // arm tt1
                 opentimers_scheduleAbsolute(
@@ -1097,16 +1062,16 @@ port_INLINE void activity_ti1ORri1(void) {
             changeState(S_RXDATAOFFSET);
 #ifdef SLOT_FSM_IMPLEMENTATION_MULTIPLE_TIMER_INTERRUPT
             // arm rt1
-         sctimer_scheduleActionIn(ACTION_RADIORX_ENABLE,ieee154e_vars.startOfSlotReference+DURATION_rt1);
+            sctimer_scheduleActionIn(ACTION_RADIORX_ENABLE,ieee154e_vars.startOfSlotReference+DURATION_rt1);
             radio_rxPacket_prepare();
             // 2. schedule timer for starting
-         sctimer_scheduleActionIn(ACTION_SET_TIMEOUT,  ieee154e_vars.startOfSlotReference+DURATION_rt2);
+            sctimer_scheduleActionIn(ACTION_SET_TIMEOUT,  ieee154e_vars.startOfSlotReference+DURATION_rt2);
             // 3.  set capture interrupt for Rx SFD done and receiving packet done
-         sctimer_setCapture(ACTION_RX_SFD_DONE);
-         sctimer_setCapture(ACTION_RX_DONE);
+            sctimer_setCapture(ACTION_RX_SFD_DONE);
+            sctimer_setCapture(ACTION_RX_DONE);
 
-         // configure the radio for that frequency
-         radio_setFrequency(ieee154e_vars.freq);
+            // configure the radio for that frequency
+            radio_setFrequency(ieee154e_vars.freq);
 #else
             // arm rt1
             opentimers_scheduleAbsolute(
@@ -1118,6 +1083,7 @@ port_INLINE void activity_ti1ORri1(void) {
             );
             // radiotimer_schedule(DURATION_rt1);
 #endif
+
             break;
         default:
 
@@ -1582,8 +1548,10 @@ port_INLINE void activity_ti9(PORT_TIMER_WIDTH capturedTime) {
         bool syncACK = TRUE;
         if (isValidAck(&ieee802514_header,ieee154e_vars.dataToSend)==FALSE) {
             // Check if the ACK is valid for whisper
+            //uint8_t              asnArray[5];
+            //ieee154e_getAsn(asnArray);
+            //whisper_log("Received ack at %d %d %d %d %d\n",asnArray[0],asnArray[1],asnArray[2],asnArray[3],asnArray[4]);
             if(whisperACKreceive(&ieee802514_header)) {
-                whisper_log("Received ACK to whisper command.\n");
                 syncACK = FALSE;
             } else {
                 // break from the do-while loop and execute the clean-up code below
@@ -1738,6 +1706,7 @@ port_INLINE void activity_ri5(PORT_TIMER_WIDTH capturedTime) {
     ieee802154_header_iht ieee802514_header;
     uint16_t lenIE=0;
     open_addr_t                 addressToWrite;
+    open_addr_t                 parentAddress;
 
     // change state
     changeState(S_TXACKOFFSET);
@@ -1869,18 +1838,27 @@ port_INLINE void activity_ri5(PORT_TIMER_WIDTH capturedTime) {
 
         // record the captured time
         ieee154e_vars.lastCapturedTime = capturedTime;
-
-        // if I just received an invalid frame, stop, unless its a 6p response to a whisper command
         ieee154e_vars.dataReceived->is6pFake = FALSE;
+        // if I just received an invalid frame, stop, unless its a 6p response to a whisper command
         if (isValidRxFrame(&ieee802514_header)==FALSE) {
+
+            uint8_t              asnArray[5];
+            ieee154e_getAsn(asnArray);
+            whisper_log("Received an invalid frame at %d %d %d %d %d\n",asnArray[0],asnArray[1],asnArray[2],asnArray[3],asnArray[4]);
             if(whisperSixtopPacketAccept(&ieee802514_header)) {
                 // Packet is part of whisper 6p transaction
-                whisper_log("Whisper 6P transaction response received.\n");
+                whisper_log("Packet is part of whisper 6p transaction \n");
                 ieee154e_vars.dataReceived->is6pFake = TRUE;
             } else {
+                whisper_log("Packet could be 6P transaction between other nodes ==> process for information \n");
                 // Packet could be 6P transaction between other nodes ==> process for information
                 whisperGetNeighborInfoFromSixtop(&ieee802514_header, ieee154e_vars.dataReceived);
                 break; // jump to the error code below this do-while loop
+            }
+        }
+        if (icmpv6rpl_getPreferredParentEui64(&parentAddress)){
+            if (packetfunctions_sameAddress(&ieee802514_header.src, &parentAddress)){
+                ieee154e_vars.receivedFrameFromParent = TRUE;
             }
         }
 
@@ -1980,12 +1958,17 @@ port_INLINE void activity_ri5(PORT_TIMER_WIDTH capturedTime) {
                     icmpv6rpl_getPreferredParentEui64(&addressToWrite)      == FALSE ||
                     (
                         icmpv6rpl_getPreferredParentEui64(&addressToWrite)           &&
-                        schedule_hasManagedTxCellToNeighbor(&addressToWrite)== FALSE
+                        schedule_hasNegotiatedCellToNeighbor(&addressToWrite, CELLTYPE_TX)== FALSE
                     )
                 )
             ) {
                 synchronizePacket(ieee154e_vars.syncCapturedTime);
             }
+
+            //uint8_t              asnArray[5];
+            //ieee154e_getAsn(asnArray);
+            //whisper_log("notifing received packet (no ack asked) at %d %d %d %d %d\n",asnArray[0],asnArray[1],asnArray[2],asnArray[3],asnArray[4]);
+
             // indicate reception to upper layer (no ACK asked)
             notif_receive(ieee154e_vars.dataReceived);
             // reset local variable
@@ -2063,7 +2046,8 @@ port_INLINE void activity_ri6(void) {
     // The source address is set to the whisper sixtop source adderess (to fake the sender)
     if(ieee154e_vars.dataReceived->is6pFake) {
         ieee154e_vars.ackToSend->is6pFake = TRUE;
-        whisper_log("Creating ACK to: "); whisper_print_address(&ieee154e_vars.dataReceived->l2_nextORpreviousHop);
+        whisper_log("Creating ACK to: "); 
+        whisper_print_address(&ieee154e_vars.dataReceived->l2_nextORpreviousHop);
     }
 
     ieee802154_prependHeader(ieee154e_vars.ackToSend,
@@ -2212,12 +2196,15 @@ port_INLINE void activity_ri9(PORT_TIMER_WIDTH capturedTime) {
     // clear local variable
     ieee154e_vars.ackToSend = NULL;
 
-    if ((idmanager_getIsDAGroot()==FALSE && ieee154e_vars.dataReceived->is6pFake == FALSE &&
+        if ((idmanager_getIsDAGroot()==FALSE && ieee154e_vars.dataReceived->is6pFake == FALSE &&
         icmpv6rpl_isPreferredParent(&(ieee154e_vars.dataReceived->l2_nextORpreviousHop))) ||
         IEEE802154_security_isConfigured() == FALSE) {
         synchronizePacket(ieee154e_vars.syncCapturedTime);
     }
 
+    //uint8_t              asnArray[5];
+    //ieee154e_getAsn(asnArray);
+    //whisper_log("ACK sent, notifing received packet at %d %d %d %d %d\n",asnArray[0],asnArray[1],asnArray[2],asnArray[3],asnArray[4]);
     // inform upper layer of reception (after ACK sent)
     notif_receive(ieee154e_vars.dataReceived);
 
@@ -2338,6 +2325,12 @@ port_INLINE uint16_t ieee154e_getTimeCorrection(void) {
     returnVal = (uint16_t)(ieee154e_vars.timeCorrection);
 
     return returnVal;
+}
+
+void ieee154e_getTicsInfo(uint32_t* numTicsOn, uint32_t* numTicsTotal){
+
+    *numTicsOn    = (uint32_t)(ieee154e_stats.numTicsOn);
+    *numTicsTotal = (uint32_t)(ieee154e_stats.numTicsTotal);
 }
 
 port_INLINE void joinPriorityStoreFromEB(uint8_t jp){
@@ -2513,6 +2506,7 @@ bool isValidEbFormat(OpenQueueEntry_t* pkt, uint16_t* lenIE){
                             slotoffset,    // slot offset
                             CELLTYPE_TXRX, // type of slot
                             TRUE,          // shared?
+                            FALSE,         // auto cell
                             channeloffset, // channel offset
                             &temp_neighbor // neighbor
                         );
@@ -2782,6 +2776,9 @@ void notif_receive(OpenQueueEntry_t* packetReceived) {
     packetReceived->owner          = COMPONENT_IEEE802154E_TO_SIXTOP;
     // post RES's Receive task
     if(packetReceived->is6pFake) {
+        //uint8_t              asnArray[5];
+        //ieee154e_getAsn(asnArray);
+        //whisper_log("Received Whisper fake 6p packet at %d %d %d %d %d\n",asnArray[0],asnArray[1],asnArray[2],asnArray[3],asnArray[4]);
         // Packet part of fake 6p transaction, let whisper process it, we don't sent it further up the stack
         scheduler_push_task(whisperSixtopProcessIE,TASKPRIO_SIXTOP_NOTIF_RX);
     } else {
@@ -2905,6 +2902,11 @@ function should already have been done. If this is not the case, this function
 will do that for you, but assume that something went wrong.
 */
 void endSlot(void) {
+
+    open_addr_t slotNeighbor;
+    open_addr_t parentAddress;
+    slotinfo_element_t  info;
+
     // turn off the radio
     radio_rfOff();
 
@@ -2965,6 +2967,36 @@ void endSlot(void) {
         ieee154e_vars.dataToSend = NULL;
     }
 
+    schedule_getSlotInfo(ieee154e_vars.slotOffset, &info);
+    if (info.link_type==CELLTYPE_RX){
+        // update numcellelapsed and numcellused on Rx cell
+
+        // update numcellused if received something
+        if (ieee154e_vars.receivedFrameFromParent) {
+            if (icmpv6rpl_getPreferredParentEui64(&parentAddress)){
+                msf_updateCellsUsed(
+                    &parentAddress,
+                    CELLTYPE_RX
+                );
+            }
+        }
+
+        // update numcellelapsed if this is auto rx or rx cell to parent
+        if (info.isAutoCell){
+            if (icmpv6rpl_getPreferredParentEui64(&parentAddress)){
+                if (schedule_hasNegotiatedCellToNeighbor(&parentAddress, CELLTYPE_RX) == FALSE) {
+                    // adapt traffic on auto rx for downstream traffic
+                    msf_updateCellsElapsed(&parentAddress, CELLTYPE_RX);
+                }
+            }
+        } else {
+            // update numelapsed on rx cell (msf will check whether it
+            // is to parent or not)
+            msf_updateCellsElapsed(&info.address, CELLTYPE_RX);
+        }
+    }
+    ieee154e_vars.receivedFrameFromParent = FALSE;
+
     // clean up dataReceived
     if (ieee154e_vars.dataReceived!=NULL) {
         // assume something went wrong. If everything went well, dataReceived
@@ -2990,6 +3022,26 @@ void endSlot(void) {
         openqueue_freePacketBuffer(ieee154e_vars.ackReceived);
         // reset local variable
         ieee154e_vars.ackReceived = NULL;
+    }
+
+    // check if this is auto tx cell
+    if (
+        schedule_getSlottOffset() == ieee154e_vars.slotOffset &&
+        schedule_getIsAutoCell()                              &&
+        schedule_getType()        == CELLTYPE_TX
+    ){
+        // check if there are unicast packets to the neighbor of this slot
+        // if no, remove the cell
+
+        schedule_getNeighbor(&slotNeighbor);
+        if (openqueue_macGetUnicastPakcet(&slotNeighbor)==NULL) {
+            schedule_removeActiveSlot(
+                ieee154e_vars.slotOffset,
+                CELLTYPE_TX,
+                TRUE,
+                &slotNeighbor
+            );
+        }
     }
 
     // change state

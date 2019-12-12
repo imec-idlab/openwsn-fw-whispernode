@@ -2,6 +2,8 @@
 #include "topology.h"
 #include "idmanager.h"
 
+//#define FORCETOPOLOGY
+
 //=========================== defines =========================================
 
 //=========================== variables =======================================
@@ -9,6 +11,7 @@
 //=========================== prototypes ======================================
 
 //=========================== public ==========================================
+
 
 /**
 \brief Force a topology.
@@ -56,40 +59,48 @@ bool topology_isAcceptablePacket(ieee802154_header_iht* ieee802514_header) {
    
    returnVal=FALSE;
    switch (idmanager_getMyID(ADDR_64B)->addr_64b[7]) {
-      case 0x57:
+      case 0x00:
          if (
-               ieee802514_header->src.addr_64b[7]==0x05
+               ieee802514_header->src.addr_64b[7]==0x84 ||
+               ieee802514_header->src.addr_64b[7]==0x56 ||
+               ieee802514_header->src.addr_64b[7]==0x39
             ) {
             returnVal=TRUE;
          }
          break;
-      case 0x05:
+      case 0x84:
          if (
-               ieee802514_header->src.addr_64b[7]==0x57 ||
-               ieee802514_header->src.addr_64b[7]==0x16
+               ieee802514_header->src.addr_64b[7]==0x00 ||
+               ieee802514_header->src.addr_64b[7]==0x39 ||
+               ieee802514_header->src.addr_64b[7]==0x56 ||
+               ieee802514_header->src.addr_64b[7]==0x73
             ) {
             returnVal=TRUE;
          }
          break;
-      case 0x16:
+      case 0x56:
          if (
-               ieee802514_header->src.addr_64b[7]==0x05 ||
-               ieee802514_header->src.addr_64b[7]==0x5e
+               ieee802514_header->src.addr_64b[7]==0x00 ||
+               ieee802514_header->src.addr_64b[7]==0x84 ||
+               ieee802514_header->src.addr_64b[7]==0x73
             ) {
             returnVal=TRUE;
          }
          break;
-      case 0x5e:
+      case 0x39:
          if (
-               ieee802514_header->src.addr_64b[7]==0x16 ||
-               ieee802514_header->src.addr_64b[7]==0xdd
+               ieee802514_header->src.addr_64b[7]==0x00 ||
+               ieee802514_header->src.addr_64b[7]==0x84 ||
+               ieee802514_header->src.addr_64b[7]==0x73
             ) {
             returnVal=TRUE;
          }
          break;
-      case 0xdd:
+      case 0x73:
          if (
-               ieee802514_header->src.addr_64b[7]==0x5e
+               ieee802514_header->src.addr_64b[7]==0x84 ||
+               ieee802514_header->src.addr_64b[7]==0x39 ||
+               ieee802514_header->src.addr_64b[7]==0x56
             ) {
             returnVal=TRUE;
          }

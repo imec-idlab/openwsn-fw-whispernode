@@ -128,6 +128,7 @@ owerror_t forwarding_send(OpenQueueEntry_t* msg) {
         dac = IPHC_DAC_STATEFUL;
     }
 
+    
     // If packet is Whipser DIO (change source address to target parent)
     if(msg->isDioFake) {
         open_addr_t* target_parent = getWhisperDIOparent();
@@ -248,7 +249,7 @@ void forwarding_sendDone(OpenQueueEntry_t* msg, owerror_t error) {
         if (error==E_FAIL) {
              openserial_printError(
                  COMPONENT_FORWARDING,
-                 ERR_FORWARDING_PACKET_DROPPED,
+                 ERR_MAXRETRIES_REACHED,
                  (errorparameter_t)1,
                  (errorparameter_t)0
             );
@@ -517,9 +518,18 @@ owerror_t forwarding_send_internal_RoutingTable(
         }
     } else {
         if(msg->isDioFake) {
+            //TODO carefull, if this is a remote dio, this should be the next hop address (the head branch) if the target is serveral hops away
+            //then, the packet would come back to the root, and the source route will be added in OV
+
+            // packetfunctions_ip128bToMac64b(getWhisperDIOparent(),&temp_prefix64btoWrite,&msg->l2_nextORpreviousHop);
+            // whisper_log("Next Hop MAC Address: ");
+            // whisper_print_address(&msg->l2_nextORpreviousHop); // should be the target
+
+            //original
             packetfunctions_ip128bToMac64b(getWhisperDIOnextHop(),&temp_prefix64btoWrite,&msg->l2_nextORpreviousHop);
             whisper_log("Next Hop MAC Address: ");
             whisper_print_address(&msg->l2_nextORpreviousHop); // should be the target
+            
         } else {
             forwarding_getNextHop(&(msg->l3_destinationAdd), &(msg->l2_nextORpreviousHop));
         }
@@ -801,7 +811,7 @@ owerror_t forwarding_send_internal_SourceRouting(
     } else {
         // log error
         openserial_printError(
-            COMPONENT_IPHC,
+            COMPONENT_FORWARDING,
             ERR_6LOWPAN_UNSUPPORTED,
             (errorparameter_t)16,
             (errorparameter_t)(temp_addr64.addr_64b[7])

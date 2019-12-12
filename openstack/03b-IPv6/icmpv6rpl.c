@@ -18,7 +18,7 @@
 //=========================== definition ======================================
 
 #define DIO_PORTION 10
-#define DAO_PORTION 30
+#define DAO_PORTION 60
 
 //=========================== variables =======================================
 
@@ -348,7 +348,7 @@ bool icmpv6rpl_isPreferredParent(open_addr_t* address) {
          neighbors_getNeighborEui64(&temp,ADDR_64B,icmpv6rpl_vars.ParentIndex);
          return packetfunctions_sameAddress(address,&temp);
       default:
-         openserial_printCritical(COMPONENT_NEIGHBORS,ERR_WRONG_ADDR_TYPE,
+         openserial_printCritical(COMPONENT_ICMPv6RPL,ERR_WRONG_ADDR_TYPE,
                                (errorparameter_t)address->type,
                                (errorparameter_t)3);
          return FALSE;
@@ -516,6 +516,11 @@ void icmpv6rpl_updateMyDAGrankAndParentSelection(void) {
         icmpv6rpl_vars.rankIncrease= prevRankIncrease;
         // no change to report on
     }
+
+    // if my rank is reached to MAXDAGRANK
+    if (icmpv6rpl_vars.myDAGrank==MAXDAGRANK) {
+        icmpv6rpl_vars.lowestRankInHistory = MAXDAGRANK;
+    }
 }
 
 /**
@@ -549,7 +554,7 @@ void icmpv6rpl_indicateRxDIO(OpenQueueEntry_t* msg) {
    uint8_t*         current;
    uint8_t          optionsLen;
    // take ownership over the packet
-   msg->owner = COMPONENT_NEIGHBORS;
+   msg->owner = COMPONENT_ICMPv6RPL;
 
    // update some fields of our DIO
    memcpy(
@@ -626,7 +631,7 @@ void icmpv6rpl_indicateRxDIO(OpenQueueEntry_t* msg) {
             ) {
                // the new DAGrank looks suspiciously high, only increment a bit
                neighbors_setNeighborRank(i,neighborRank + ((3*DEFAULTLINKCOST-2)*2*MINHOPRANKINCREASE));
-               openserial_printError(COMPONENT_NEIGHBORS,ERR_LARGE_DAGRANK,
+               openserial_printError(COMPONENT_ICMPv6RPL,ERR_LARGE_DAGRANK,
                                (errorparameter_t)icmpv6rpl_vars.incomingDio->rank,
                                (errorparameter_t)neighborRank);
             } else {
@@ -713,7 +718,7 @@ void sendDIO(void) {
             icmpv6rpl_getPreferredParentEui64(&addressToWrite) == FALSE ||
             (
                 icmpv6rpl_getPreferredParentEui64(&addressToWrite) &&
-                schedule_hasManagedTxCellToNeighbor(&addressToWrite) == FALSE
+                schedule_hasNegotiatedCellToNeighbor(&addressToWrite, CELLTYPE_TX) == FALSE
             )
         )
     ){
@@ -820,6 +825,7 @@ void sendDIO(void) {
     }
 }
 
+
 uint8_t send_WhisperDIO() {
     OpenQueueEntry_t*    msg;
 
@@ -849,8 +855,8 @@ uint8_t send_WhisperDIO() {
     msg = openqueue_getFreePacketBuffer(COMPONENT_ICMPv6RPL);
     if (msg==NULL) {
         openserial_printError(COMPONENT_ICMPv6RPL,ERR_NO_FREE_PACKET_BUFFER,
-                              (errorparameter_t)0,
-                              (errorparameter_t)0);
+                              (errorparameter_t)1,
+                              (errorparameter_t)1);
         return 0;
     }
 
@@ -910,7 +916,7 @@ uint8_t send_WhisperDIO() {
 
     //send
     if (icmpv6_send(msg)==E_SUCCESS) {
-        whisper_log("DIO success.\n");
+        whisper_log("Enqueueing DIO success.\n");
         return E_SUCCESS;
     } else {
         whisper_log("DIO failed.\n");
@@ -984,7 +990,7 @@ void sendDAO(void) {
         icmpv6rpl_getPreferredParentEui64(&address) == FALSE ||
         (
             icmpv6rpl_getPreferredParentEui64(&address) &&
-            schedule_hasManagedTxCellToNeighbor(&address) == FALSE
+            schedule_hasNegotiatedCellToNeighbor(&address, CELLTYPE_TX) == FALSE
         )
     ){
         // delete packets genereted by this module (EB and KA) from openqueue

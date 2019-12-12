@@ -152,10 +152,10 @@ void sixtop_setEBPeriod(uint8_t ebPeriod) {
 }
 
 void  sixtop_setSFcallback(
-    sixtop_sf_getsfid           cb0,
-    sixtop_sf_getmetadata       cb1,
-    sixtop_sf_translatemetadata cb2,
-    sixtop_sf_handle_callback   cb3
+    sixtop_sf_getsfid_cbt           cb0,
+    sixtop_sf_getmetadata_cbt       cb1,
+    sixtop_sf_translatemetadata_cbt cb2,
+    sixtop_sf_handle_callback_cbt   cb3
 ){
    sixtop_vars.cb_sf_getsfid            = cb0;
    sixtop_vars.cb_sf_getMetadata        = cb1;
@@ -188,7 +188,7 @@ owerror_t sixtop_request(
         sixtop_vars.six2six_state != SIX_STATE_IDLE   ||
         neighbor                  == NULL
     ){
-        // neighbor can't be none or previous transcation doesn't finishe yet
+        // neighbor can't be none or previous transcation doesn't finish yet
         return E_FAIL;
     }
 
@@ -216,7 +216,7 @@ owerror_t sixtop_request(
     pkt->is6pFake = FALSE;
 
     memcpy(&(pkt->l2_nextORpreviousHop),neighbor,sizeof(open_addr_t));
-    if (celllist_toBeDeleted != NULL) {
+    if (celllist_toBeDeleted != NULL){
         memcpy(sixtop_vars.celllist_toDelete,celllist_toBeDeleted,CELLLIST_MAX_LEN*sizeof(cellInfo_ht));
     }
     sixtop_vars.cellOptions = cellOptions;
@@ -335,6 +335,8 @@ owerror_t sixtop_request(
     outcome = sixtop_send(pkt);
 
     if (outcome == E_SUCCESS){
+        whisper_log("Sending 6p transaction %d in node %d\n",code,idmanager_getMyID(ADDR_64B)->addr_64b[7]);
+
         //update states
         switch(code){
         case IANA_6TOP_CMD_ADD:
@@ -365,30 +367,6 @@ owerror_t sixtop_request(
 //======= from upper layer
 
 owerror_t sixtop_send(OpenQueueEntry_t *msg) {
-
-    open_addr_t addressToWrite;
-
-    if (
-        idmanager_getIsDAGroot() == FALSE               &&
-        (
-            msg->creator != COMPONENT_SIXTOP_RES        &&
-            msg->creator != COMPONENT_CJOIN             &&
-            (
-                icmpv6rpl_getPreferredParentEui64(&addressToWrite) == FALSE      ||
-                (
-                    icmpv6rpl_getPreferredParentEui64(&addressToWrite)           &&
-                    (
-                        msf_getHashCollisionFlag() == FALSE                      &&
-                        schedule_hasAutonomousTxRxCellUnicast(&addressToWrite)== FALSE
-                    )
-                )
-            )
-        )
-    ){
-        return E_FAIL;
-    }
-
-
 
     // set metadata
     msg->owner        = COMPONENT_SIXTOP;
@@ -544,6 +522,7 @@ void task_sixtopNotifReceive(void) {
                 openqueue_freePacketBuffer(msg);
                 break;
             }
+            whisper_log("Received packet in %d, sending to iphc\n",idmanager_getMyID(ADDR_64B)->addr_64b[7]);
             // send to upper layer
             iphc_receive(msg);
         } else {
@@ -653,6 +632,25 @@ owerror_t sixtop_send_internal(
     );
     // change owner to IEEE802154E fetches it from queue
     msg->owner  = COMPONENT_SIXTOP_TO_IEEE802154E;
+
+    if (
+        packetfunctions_isBroadcastMulticast(&(msg->l2_nextORpreviousHop))   == FALSE &&
+        schedule_hasNegotiatedCellToNeighbor(&(msg->l2_nextORpreviousHop), CELLTYPE_TX) == FALSE &&
+        schedule_hasAutoTxCellToNeighbor(&(msg->l2_nextORpreviousHop))       == FALSE
+    ){
+        // the frame source address is not broadcast/multicast
+        // no negotiated tx cell to that neighbor
+        // no auto tx cell to that neighbor
+
+        schedule_addActiveSlot(
+            msf_hashFunction_getSlotoffset(&(msg->l2_nextORpreviousHop)),    // slot offset
+            CELLTYPE_TX,                                                     // type of slot
+            TRUE,                                                            // shared?
+            TRUE,                                                            // auto cell?
+            msf_hashFunction_getChanneloffset(&(msg->l2_nextORpreviousHop)), // channel offset
+            &(msg->l2_nextORpreviousHop)                                     // neighbor
+        );
+    }
     return E_SUCCESS;
 }
 
@@ -871,7 +869,7 @@ port_INLINE void sixtop_sendKA(void) {
         return;
     }
 
-    if (schedule_hasManagedTxCellToNeighbor(kaNeighAddr) == FALSE){
+    if (schedule_hasNegotiatedCellToNeighbor(kaNeighAddr, CELLTYPE_TX) == FALSE){
         // delete packets genereted by this module (EB and KA) from openqueue
         openqueue_removeAllCreatedBy(COMPONENT_SIXTOP);
 
@@ -927,7 +925,7 @@ void timer_sixtop_six2six_timeout_fired(void) {
 
     if (sixtop_vars.six2six_state == SIX_STATE_WAIT_CLEARRESPONSE){
         // no response for the 6p clear, just clear locally
-        schedule_removeAllManagedUnicastCellsToNeighbor(
+        schedule_removeAllNegotiatedCellsToNeighbor(
             sixtop_vars.cb_sf_getMetadata(),
             &sixtop_vars.neighborToClearCells
         );
@@ -946,8 +944,18 @@ void sixtop_six2six_sendDone(OpenQueueEntry_t* msg, owerror_t error){
     // if this is a request send done
     if (msg->l2_sixtop_messageType == SIXTOP_CELL_REQUEST){
         if(error == E_FAIL) {
-            // reset handler and state if the request is failed to send out
-            sixtop_vars.six2six_state = SIX_STATE_IDLE;
+            // max retries, without ack
+            switch (sixtop_vars.six2six_state) {
+
+            case SIX_STATE_WAIT_CLEARREQUEST_SENDDONE:
+                sixtop_vars.six2six_state = SIX_STATE_WAIT_CLEARRESPONSE;
+                timer_sixtop_six2six_timeout_fired();
+                break;
+            default:
+                // reset handler and state if the request is failed to send out
+                sixtop_vars.six2six_state = SIX_STATE_IDLE;
+                break;
+            }
         } else {
             // the packet has been sent out successfully
             switch (sixtop_vars.six2six_state) {
@@ -1024,7 +1032,7 @@ void sixtop_six2six_sendDone(OpenQueueEntry_t* msg, owerror_t error){
                 }
 
                 if ( msg->l2_sixtop_command == IANA_6TOP_CMD_CLEAR){
-                    schedule_removeAllManagedUnicastCellsToNeighbor(
+                    schedule_removeAllNegotiatedCellsToNeighbor(
                         msg->l2_sixtop_frameID,
                         &(msg->l2_nextORpreviousHop)
                     );
@@ -1039,7 +1047,7 @@ void sixtop_six2six_sendDone(OpenQueueEntry_t* msg, owerror_t error){
 
             // if the response is for CLEAR command, remove all the cells and reset seqnum regardless NO ack received.
             if ( msg->l2_sixtop_command == IANA_6TOP_CMD_CLEAR){
-                schedule_removeAllManagedUnicastCellsToNeighbor(
+                schedule_removeAllNegotiatedCellsToNeighbor(
                     msg->l2_sixtop_frameID,
                     &(msg->l2_nextORpreviousHop)
                 );
@@ -1059,6 +1067,7 @@ port_INLINE bool sixtop_processIEs(OpenQueueEntry_t* pkt, uint16_t * lenIE) {
 
     ptr         = 0;
     headerlen   = 0;
+     
 
     //candidate IE header  if type ==0 header IE if type==1 payload IE
     temp_8b     = *((uint8_t*)(pkt->payload)+ptr);
@@ -1066,15 +1075,22 @@ port_INLINE bool sixtop_processIEs(OpenQueueEntry_t* pkt, uint16_t * lenIE) {
     temp_16b    = temp_8b + ((*((uint8_t*)(pkt->payload)+ptr))<<8);
     ptr++;
     *lenIE += 2;
+    whisper_log("Processing IE %d with length %d\n",temp_16b,pkt->length);
+
     // check ietf ie group id, type
     if ((temp_16b & IEEE802154E_DESC_LEN_PAYLOAD_ID_TYPE_MASK) != (IANA_IETF_IE_GROUP_ID | IANA_IETF_IE_TYPE)){
+
+        whisper_log("rec err val1 is %d\n",(temp_16b & IEEE802154E_DESC_LEN_PAYLOAD_ID_TYPE_MASK));
+        whisper_log("rec err val2 is %d\n",(IANA_IETF_IE_GROUP_ID | IANA_IETF_IE_TYPE));
         // wrong IE ID or type, record and drop the packet
         openserial_printError(COMPONENT_SIXTOP,ERR_UNSUPPORTED_FORMAT,0,0);
         return FALSE;
     }
+    //whisper_log("rec ok val1 is %d\n",(temp_16b & IEEE802154E_DESC_LEN_PAYLOAD_ID_TYPE_MASK));
+    //whisper_log("rec ok val2 is %d\n",(IANA_IETF_IE_GROUP_ID | IANA_IETF_IE_TYPE));
     len = temp_16b & IEEE802154E_DESC_LEN_PAYLOAD_IE_MASK;
     *lenIE += len;
-
+    whisper_log("Len IE %d\n",len);
     // check 6p subtype Id
     subtypeid  = *((uint8_t*)(pkt->payload)+ptr);
     ptr += 1;
@@ -1111,6 +1127,7 @@ port_INLINE bool sixtop_processIEs(OpenQueueEntry_t* pkt, uint16_t * lenIE) {
     ptr       += 1;
     headerlen += 1;
 
+    whisper_log("headerlen IE %d\n",len);
 
     if(pkt->is6pFake == TRUE) {
         // notify whisper that a response has been received
@@ -1119,7 +1136,6 @@ port_INLINE bool sixtop_processIEs(OpenQueueEntry_t* pkt, uint16_t * lenIE) {
         // give six2six to process
         sixtop_six2six_notifyReceive(version,type,code,sfid,seqNum,ptr,len-headerlen,pkt);
     }
-
     *lenIE     = len+2;
     return TRUE;
 }
@@ -1155,6 +1171,8 @@ void sixtop_six2six_notifyReceive(
     if (type == SIXTOP_CELL_REQUEST){
         // if this is a 6p request message
 
+        whisper_log("Received 6p request in node %d\n",idmanager_getMyID(ADDR_64B)->addr_64b[7]);
+
         // drop the packet if there are too many 6P response in the queue
         if (openqueue_getNum6PResp()>=MAX6PRESPONSE) {
             return;
@@ -1180,8 +1198,6 @@ void sixtop_six2six_notifyReceive(
                &(pkt->l2_nextORpreviousHop),
                sizeof(open_addr_t)
         );
-
-
 
         // the follow while loop only execute once
         do{
@@ -1330,7 +1346,7 @@ void sixtop_six2six_notifyReceive(
             pktLen  -= 1;
 
             // add command
-            if (code == IANA_6TOP_CMD_ADD) {
+            if (code == IANA_6TOP_CMD_ADD){
                 if (schedule_getNumberOfFreeEntries() < numCells){
                     returnCode = IANA_6TOP_RC_BUSY;
                     break;
@@ -1506,6 +1522,8 @@ void sixtop_six2six_notifyReceive(
         response_pkt->l2_sixtop_messageType    = SIXTOP_CELL_RESPONSE;
 
         if (sixtop_vars.isResponseEnabled){
+            whisper_log("Sending 6p response %d in node %d\n",code,idmanager_getMyID(ADDR_64B)->addr_64b[7]);
+
             // send packet
             sixtop_send(response_pkt);
         } else {
@@ -1515,7 +1533,7 @@ void sixtop_six2six_notifyReceive(
 
     if (type == SIXTOP_CELL_RESPONSE) {
         // this is a 6p response message
-
+        whisper_log("Received 6p response in node %d\n",idmanager_getMyID(ADDR_64B)->addr_64b[7]);
         // Whisper, if the address matches with the target clear the autonoumous cell
         //whisperCheckSixtopResponseAddr(&pkt->l2_nextORpreviousHop);
 
@@ -1544,9 +1562,21 @@ void sixtop_six2six_notifyReceive(
                 neighbors_updateSequenceNumber(&(pkt->l2_nextORpreviousHop));
                 break;
             case SIX_STATE_WAIT_DELETERESPONSE:
+                i = 0;
+                memset(pkt->l2_sixtop_celllist_delete,0,sizeof(pkt->l2_sixtop_celllist_delete));
+                while(pktLen>0){
+                    pkt->l2_sixtop_celllist_delete[i].slotoffset     =  *((uint8_t*)(pkt->payload)+ptr);
+                    pkt->l2_sixtop_celllist_delete[i].slotoffset    |= (*((uint8_t*)(pkt->payload)+ptr+1))<<8;
+                    pkt->l2_sixtop_celllist_delete[i].channeloffset  =  *((uint8_t*)(pkt->payload)+ptr+2);
+                    pkt->l2_sixtop_celllist_delete[i].channeloffset |= (*((uint8_t*)(pkt->payload)+ptr+3))<<8;
+                    pkt->l2_sixtop_celllist_delete[i].isUsed         = TRUE;
+                    ptr    += 4;
+                    pktLen -= 4;
+                    i++;
+                }
                 sixtop_removeCells(
                     sixtop_vars.cb_sf_getMetadata(),
-                    sixtop_vars.celllist_toDelete,
+                    pkt->l2_sixtop_celllist_delete,
                     &(pkt->l2_nextORpreviousHop),
                     sixtop_vars.cellOptions
                 );
@@ -1614,17 +1644,15 @@ void sixtop_six2six_notifyReceive(
                 neighbors_updateSequenceNumber(&(pkt->l2_nextORpreviousHop));
                 break;
             case SIX_STATE_WAIT_CLEARRESPONSE:
-                schedule_removeAllManagedUnicastCellsToNeighbor(
+                schedule_removeAllNegotiatedCellsToNeighbor(
                     sixtop_vars.cb_sf_getMetadata(),
                     &(pkt->l2_nextORpreviousHop)
                 );
                 neighbors_resetSequenceNumber(&(pkt->l2_nextORpreviousHop));
                 break;
             default:
-                // The sixtop response arrived after 6P TIMEOUT.
-
-
-                // it's a duplicated response.
+                // The sixtop response arrived after 6P TIMEOUT, or
+                // it's a duplicated response. Remove 6P request if I have.
 
                 openqueue_remove6PrequestToNeighbor(&(pkt->l2_nextORpreviousHop));
 
@@ -1684,6 +1712,7 @@ bool sixtop_addCells(
                 cellList[i].slotoffset,
                 type,
                 isShared,
+                FALSE,
                 cellList[i].channeloffset,
                 &temp_neighbor
             );
@@ -1694,14 +1723,30 @@ bool sixtop_addCells(
 }
 
 bool sixtop_removeCells(
-      uint8_t      slotframeID,
-      cellInfo_ht* cellList,
-      open_addr_t* previousHop,
+    uint8_t      slotframeID,
+    cellInfo_ht* cellList,
+    open_addr_t* previousHop,
     uint8_t      cellOptions
-   ){
+){
     uint8_t     i;
+    bool        isShared;
     open_addr_t temp_neighbor;
+    cellType_t  type;
     bool        hasCellsRemoved;
+
+    // translate cellOptions to cell type
+    if (cellOptions == CELLOPTIONS_TX){
+        type     = CELLTYPE_TX;
+        isShared = FALSE;
+    }
+    if (cellOptions == CELLOPTIONS_RX){
+        type     = CELLTYPE_RX;
+        isShared = FALSE;
+    }
+    if (cellOptions == (CELLOPTIONS_TX | CELLOPTIONS_RX | CELLOPTIONS_SHARED)){
+        type     = CELLTYPE_TXRX;
+        isShared = TRUE;
+    }
 
     memcpy(&temp_neighbor,previousHop,sizeof(open_addr_t));
 
@@ -1712,6 +1757,8 @@ bool sixtop_removeCells(
             hasCellsRemoved = TRUE;
             schedule_removeActiveSlot(
                 cellList[i].slotoffset,
+                type,
+                isShared,
                 &temp_neighbor
             );
         }
@@ -1831,6 +1878,7 @@ bool sixtop_areAvailableCellsToBeRemoved(
    return available;
 }
 
+
 // Whisper
 owerror_t sixtop_request_Whisper(
         uint8_t      code,
@@ -1847,9 +1895,11 @@ owerror_t sixtop_request_Whisper(
     uint16_t length_groupid_type;
     owerror_t outcome;
 
+    whisper_log("Sending fake 6p transaction %d \n",code);
+
     // filter parameters: handler, status and neighbor
     if (neighbor == NULL) {
-        whisper_log("Neighbour should be defined");
+        whisper_log("Neighbour should be defined\n");
         return E_FAIL;
     }
 
@@ -1922,6 +1972,7 @@ owerror_t sixtop_request_Whisper(
         len += 1;
     }
 
+    whisper_log("Sending fake 6p transaction with cell options %d \n",cellOptions);
     // append 6p metadata
     packetfunctions_reserveHeaderSize(pkt, sizeof(uint16_t));
     pkt->payload[0] = (uint8_t) (sixtop_vars.cb_sf_getMetadata() & 0x00FF);
@@ -1975,3 +2026,4 @@ owerror_t sixtop_request_Whisper(
     }
     return outcome;
 }
+
