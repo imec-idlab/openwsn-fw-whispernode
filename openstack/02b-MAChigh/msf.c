@@ -181,7 +181,7 @@ metadata_t msf_translateMetadata(void){
 
 void msf_handleRCError(uint8_t code, open_addr_t* address){
     uint16_t waitDuration;
-    printf("Handling RC error %d in node %d\n",code,idmanager_getMyID(ADDR_64B)->addr_64b[7]);
+    //printf("Handling RC error %d in node %d\n",code,idmanager_getMyID(ADDR_64B)->addr_64b[7]);
     if (
         code==IANA_6TOP_RC_RESET        ||
         code==IANA_6TOP_RC_LOCKED
