@@ -54,62 +54,63 @@ topology.
 \return FALSE if the packet should be silently dropped.
 */
 bool topology_isAcceptablePacket(ieee802154_header_iht* ieee802514_header) {
-#ifdef FORCETOPOLOGY
-   bool returnVal;
-   
-   returnVal=FALSE;
-   switch (idmanager_getMyID(ADDR_64B)->addr_64b[7]) {
-      case 0x00:
-         if (
-               ieee802514_header->src.addr_64b[7]==0x84 ||
-               ieee802514_header->src.addr_64b[7]==0x56 ||
-               ieee802514_header->src.addr_64b[7]==0x39
-            ) {
-            returnVal=TRUE;
-         }
-         break;
-      case 0x84:
-         if (
-               ieee802514_header->src.addr_64b[7]==0x00 ||
-               ieee802514_header->src.addr_64b[7]==0x39 ||
-               ieee802514_header->src.addr_64b[7]==0x56 ||
-               ieee802514_header->src.addr_64b[7]==0x73
-            ) {
-            returnVal=TRUE;
-         }
-         break;
-      case 0x56:
-         if (
-               ieee802514_header->src.addr_64b[7]==0x00 ||
-               ieee802514_header->src.addr_64b[7]==0x84 ||
-               ieee802514_header->src.addr_64b[7]==0x73
-            ) {
-            returnVal=TRUE;
-         }
-         break;
-      case 0x39:
-         if (
-               ieee802514_header->src.addr_64b[7]==0x00 ||
-               ieee802514_header->src.addr_64b[7]==0x84 ||
-               ieee802514_header->src.addr_64b[7]==0x73
-            ) {
-            returnVal=TRUE;
-         }
-         break;
-      case 0x73:
-         if (
-               ieee802514_header->src.addr_64b[7]==0x84 ||
-               ieee802514_header->src.addr_64b[7]==0x39 ||
-               ieee802514_header->src.addr_64b[7]==0x56
-            ) {
-            returnVal=TRUE;
-         }
-         break;
-   }
-   return returnVal;
-#else
-   return TRUE;
-#endif
+return TRUE;
+/*#ifdef FORCETOPOLOGY*/
+/*   bool returnVal;*/
+/*   */
+/*   returnVal=FALSE;*/
+/*   switch (idmanager_getMyID(ADDR_64B)->addr_64b[7]) {*/
+/*      case 0x00:*/
+/*         if (*/
+/*               ieee802514_header->src.addr_64b[7]==0x84 ||*/
+/*               ieee802514_header->src.addr_64b[7]==0x56 ||*/
+/*               ieee802514_header->src.addr_64b[7]==0x39*/
+/*            ) {*/
+/*            returnVal=TRUE;*/
+/*         }*/
+/*         break;*/
+/*      case 0x84:*/
+/*         if (*/
+/*               ieee802514_header->src.addr_64b[7]==0x00 ||*/
+/*               ieee802514_header->src.addr_64b[7]==0x39 ||*/
+/*               ieee802514_header->src.addr_64b[7]==0x56 ||*/
+/*               ieee802514_header->src.addr_64b[7]==0x73*/
+/*            ) {*/
+/*            returnVal=TRUE;*/
+/*         }*/
+/*         break;*/
+/*      case 0x56:*/
+/*         if (*/
+/*               ieee802514_header->src.addr_64b[7]==0x00 ||*/
+/*               ieee802514_header->src.addr_64b[7]==0x84 ||*/
+/*               ieee802514_header->src.addr_64b[7]==0x73*/
+/*            ) {*/
+/*            returnVal=TRUE;*/
+/*         }*/
+/*         break;*/
+/*      case 0x39:*/
+/*         if (*/
+/*               ieee802514_header->src.addr_64b[7]==0x00 ||*/
+/*               ieee802514_header->src.addr_64b[7]==0x84 ||*/
+/*               ieee802514_header->src.addr_64b[7]==0x73*/
+/*            ) {*/
+/*            returnVal=TRUE;*/
+/*         }*/
+/*         break;*/
+/*      case 0x73:*/
+/*         if (*/
+/*               ieee802514_header->src.addr_64b[7]==0x84 ||*/
+/*               ieee802514_header->src.addr_64b[7]==0x39 ||*/
+/*               ieee802514_header->src.addr_64b[7]==0x56*/
+/*            ) {*/
+/*            returnVal=TRUE;*/
+/*         }*/
+/*         break;*/
+/*   }*/
+/*   return returnVal;*/
+/*#else*/
+/*   return TRUE;*/
+/*#endif*/
 }
 
 //=========================== private =========================================
